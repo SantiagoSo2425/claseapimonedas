@@ -10,13 +10,6 @@ pipeline {
     }
 
     stages {
-        /*
-        stage('Compilación Maven') {
-            steps {
-                bat 'mvn clean package -Dskiptests'
-            }
-        }
-        */
         stage('Construir imagen') {
             steps {
                 bat "docker build . -t ${DOCKER_IMAGE}"
@@ -24,8 +17,15 @@ pipeline {
         }
         stage('Detener contenedor existente') {
             steps {
-                bat "docker stop ${CONTAINER_NAME} || echo 'No se pudo detener el contenedor porque no existe.'"
-                bat "docker rm ${CONTAINER_NAME} || echo 'No se pudo eliminar el contenedor porque no existe.'"
+                // Detener el contenedor si existe, pero siempre retornar éxito
+                bat '''
+                    docker stop ${CONTAINER_NAME} || echo "No se pudo detener el contenedor porque no existe."
+                    exit 0
+                '''
+                bat '''
+                    docker rm ${CONTAINER_NAME} || echo "No se pudo eliminar el contenedor porque no existe."
+                    exit 0
+                '''
             }
         }
         stage('Desplegar contenedor') {
