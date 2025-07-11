@@ -7,9 +7,8 @@ pipeline{
         // Configurar la dirección del servidor de Kubernetes - actualizar con la dirección correcta
         KUBERNETES_SERVER = "https://192.168.49.2:8443"  // Dirección típica de Minikube
         KUBECONFIG = "${WORKSPACE}\\kubeconfig.yaml"     // Archivo temporal para la configuración
-        // Credenciales para acceder al cluster (opcional, según el tipo de autenticación)
+        // Ya no usamos credenciales de token, eliminar esta línea
         KUBERNETES_USER = "minikube-user"
-        KUBERNETES_TOKEN = credentials('kubernetes-token') // Token de autenticación (crear en Jenkins)
     }
 
     stages {
@@ -199,27 +198,33 @@ pipeline{
 
     post {
         success {
-            echo 'Pipeline de base de datos completado exitosamente'
+            node(null) {
+                echo 'Pipeline de base de datos completado exitosamente'
+            }
         }
         failure {
-            echo 'El pipeline de base de datos falló. Revisando los logs...'
-            script {
-                bat """
-                    echo "=== Logs del pod de la base de datos ==="
-                    kubectl --kubeconfig=%KUBECONFIG% logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
+            node(null) {
+                echo 'El pipeline de base de datos falló. Revisando los logs...'
+                script {
+                    bat """
+                        echo "=== Logs del pod de la base de datos ==="
+                        kubectl --kubeconfig=%KUBECONFIG% logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
 
-                    echo "=== Descripción del pod de la base de datos ==="
-                    kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
+                        echo "=== Descripción del pod de la base de datos ==="
+                        kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
 
-                    echo "=== Eventos del namespace ==="
-                    kubectl --kubeconfig=%KUBECONFIG% get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
-                """
+                        echo "=== Eventos del namespace ==="
+                        kubectl --kubeconfig=%KUBECONFIG% get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
+                    """
+                }
             }
         }
         always {
-            echo 'Limpieza de recursos temporales...'
-            // Opcionalmente, eliminar el archivo kubeconfig temporal al finalizar
-            bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
+            node(null) {
+                echo 'Limpieza de recursos temporales...'
+                // Opcionalmente, eliminar el archivo kubeconfig temporal al finalizar
+                bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
+            }
         }
     }
 }
