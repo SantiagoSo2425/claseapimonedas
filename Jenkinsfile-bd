@@ -55,33 +55,42 @@
                 script {
                     echo "Esperando a que el pod de la base de datos esté listo..."
                     timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
-                        bat """
-                            $podReady = $false
-                            $retries = 0
-                            $maxRetries = 30
+                        // Utilizamos groovy directamente para el polling
+                        def podReady = false
+                        def retries = 0
+                        def maxRetries = 30
 
-                            do {
-                                $status = kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath="{.status.phase}"
-                                if ($status -eq "Running") {
-                                    $containerReady = kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath="{.status.containerStatuses[0].ready}"
-                                    if ($containerReady -eq "true") {
-                                        $podReady = $true
+                        while (!podReady && retries < maxRetries) {
+                            try {
+                                def statusText = bat(script: "kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
+                                echo "Estado del pod: ${statusText}"
+
+                                if (statusText == "Running") {
+                                    def containerReadyText = bat(script: "kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.containerStatuses[0].ready}\"", returnStdout: true).trim()
+                                    echo "Contenedor listo: ${containerReadyText}"
+
+                                    if (containerReadyText == "true") {
+                                        podReady = true
                                         echo "Pod de la base de datos está listo!"
                                     }
                                 }
 
-                                if (-not $podReady) {
-                                    $retries++
-                                    if ($retries -ge $maxRetries) {
+                                if (!podReady) {
+                                    retries++
+                                    if (retries >= maxRetries) {
                                         echo "Se alcanzó el número máximo de reintentos. Verificando el estado..."
-                                        kubectl describe pod bdmonedas-sfs-0 -n bdmonedas
-                                        exit 1
+                                        bat "kubectl describe pod bdmonedas-sfs-0 -n bdmonedas"
+                                        error "El pod de la base de datos no está listo después de ${maxRetries} intentos."
                                     }
-                                    echo "Esperando 10 segundos para verificar nuevamente (intento $retries de $maxRetries)..."
-                                    Start-Sleep -Seconds 10
+                                    echo "Esperando 10 segundos para verificar nuevamente (intento ${retries} de ${maxRetries})..."
+                                    sleep(time: 10, unit: 'SECONDS')
                                 }
-                            } while (-not $podReady)
-                        """
+                            } catch (Exception e) {
+                                echo "Error al verificar el estado del pod: ${e.message}"
+                                retries++
+                                sleep(time: 10, unit: 'SECONDS')
+                            }
+                        }
                     }
                 }
             }
@@ -112,7 +121,7 @@
                     def timestamp = new Date().format('yyyyMMdd_HHmmss')
                     echo "Creando backup inicial de la base de datos..."
                     bat """
-                        mkdir -p backups || echo "Directorio de backups ya existe"
+                        mkdir backups 2>nul || echo "Directorio de backups ya existe"
                         kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- pg_dump -U postgres -d monedasdb -F c -f /tmp/backup_inicial.dump
                         kubectl cp bdmonedas/bdmonedas-sfs-0:/tmp/backup_inicial.dump backups/backup_inicial_${timestamp}.dump || echo "Error al copiar el backup"
                     """
