@@ -83,7 +83,7 @@ pipeline{
                         // Utilizamos groovy directamente para el polling
                         def podReady = false
                         def retries = 0
-                        def maxRetries = 30
+                        def maxRetries = 10
 
                         while (!podReady && retries < maxRetries) {
                             try {
