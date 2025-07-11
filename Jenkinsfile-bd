@@ -1,0 +1,153 @@
+﻿pipeline{
+    agent any
+
+    environment {
+        TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
+        DB_NAMESPACE = "bdmonedas"
+    }
+
+    stages {
+        stage('Limpiar datos previos') {
+            steps {
+                script {
+                    // Asegurarse de eliminar completamente el StatefulSet anterior si existe
+                    bat """
+                        kubectl delete statefulset bdmonedas-sfs --namespace bdmonedas --ignore-not-found
+                        kubectl delete pvc --selector=app=bdmonedas --namespace bdmonedas --ignore-not-found
+                        kubectl delete configmap bdmonedas-config --namespace bdmonedas --ignore-not-found
+                        kubectl delete service bdmonedas-servicio --namespace bdmonedas --ignore-not-found
+                        kubectl delete persistentvolume bdmonedas-pv --ignore-not-found
+                    """
+                }
+            }
+        }
+        stage('Crear namespace si no existe') {
+            steps {
+                script {
+                    bat """ kubectl get namespace bdmonedas || kubectl create namespace bdmonedas """
+                }
+            }
+        }
+        stage('Aplicar manifiestos infrastructura') {
+            steps {
+                script {
+                    // Aplicar el StorageClass primero si existe
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-storage-class.yaml || echo "StorageClass ya existe o no se encuentra" """
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-pv.yaml """
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-secretos.yaml """
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-init.yaml """
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-servicios.yaml """
+                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-sfs.yaml """
+                }
+            }
+        }
+        stage('Verificar Despliegue') {
+            steps {
+                script {
+                    bat """ kubectl get pods -n bdmonedas """
+                    bat """ kubectl get services -n bdmonedas """
+                    bat """ kubectl get statefulset -n bdmonedas """
+                }
+            }
+        }
+        stage('Esperar a que la BD esté lista') {
+            steps {
+                script {
+                    echo "Esperando a que el pod de la base de datos esté listo..."
+                    timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
+                        bat """
+                            $podReady = $false
+                            $retries = 0
+                            $maxRetries = 30
+
+                            do {
+                                $status = kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath="{.status.phase}"
+                                if ($status -eq "Running") {
+                                    $containerReady = kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath="{.status.containerStatuses[0].ready}"
+                                    if ($containerReady -eq "true") {
+                                        $podReady = $true
+                                        echo "Pod de la base de datos está listo!"
+                                    }
+                                }
+
+                                if (-not $podReady) {
+                                    $retries++
+                                    if ($retries -ge $maxRetries) {
+                                        echo "Se alcanzó el número máximo de reintentos. Verificando el estado..."
+                                        kubectl describe pod bdmonedas-sfs-0 -n bdmonedas
+                                        exit 1
+                                    }
+                                    echo "Esperando 10 segundos para verificar nuevamente (intento $retries de $maxRetries)..."
+                                    Start-Sleep -Seconds 10
+                                }
+                            } while (-not $podReady)
+                        """
+                    }
+                }
+            }
+        }
+        stage('Verificar conexión a la BD') {
+            steps {
+                script {
+                    echo "Verificando conexión a la base de datos PostgreSQL..."
+                    bat """
+                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "SELECT 'Conexión exitosa a la base de datos' as mensaje;"
+                    """
+                }
+            }
+        }
+        stage('Verificar tablas creadas') {
+            steps {
+                script {
+                    echo "Verificando tablas creadas en la base de datos..."
+                    bat """
+                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "\\dt"
+                    """
+                }
+            }
+        }
+        stage('Backup inicial') {
+            steps {
+                script {
+                    def timestamp = new Date().format('yyyyMMdd_HHmmss')
+                    echo "Creando backup inicial de la base de datos..."
+                    bat """
+                        mkdir -p backups || echo "Directorio de backups ya existe"
+                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- pg_dump -U postgres -d monedasdb -F c -f /tmp/backup_inicial.dump
+                        kubectl cp bdmonedas/bdmonedas-sfs-0:/tmp/backup_inicial.dump backups/backup_inicial_${timestamp}.dump || echo "Error al copiar el backup"
+                    """
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                echo 'Despliegue completado exitosamente'
+                echo 'Base de datos PostgreSQL lista para ser utilizada por la aplicación'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline de base de datos completado exitosamente'
+        }
+        failure {
+            echo 'El pipeline de base de datos falló. Revisando los logs...'
+            script {
+                bat """
+                    echo "=== Logs del pod de la base de datos ==="
+                    kubectl logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
+
+                    echo "=== Descripción del pod de la base de datos ==="
+                    kubectl describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
+
+                    echo "=== Eventos del namespace ==="
+                    kubectl get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
+                """
+            }
+        }
+        always {
+            echo 'Limpieza de recursos temporales...'
+        }
+    }
+}

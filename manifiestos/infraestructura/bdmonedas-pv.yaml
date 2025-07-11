@@ -1,0 +1,15 @@
+﻿apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: bdmonedas-pv
+  namespace: bdmonedas
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: bdmonedas-storage-class
+  hostPath:
+    path: "/tmp/data/postgres"
+    type: DirectoryOrCreate

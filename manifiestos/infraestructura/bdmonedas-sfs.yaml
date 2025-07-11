@@ -1,0 +1,50 @@
+﻿apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bdmonedas-sfs
+  namespace: bdmonedas
+spec:
+  serviceName: bdmonedas-servicio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bdmonedas
+  template:
+    metadata:
+      labels:
+        app: bdmonedas
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: bdmonedas-secretos
+              key: db-password
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_DB
+          value: monedasdb
+        volumeMounts:
+        - name: data-volume
+          mountPath: /var/lib/postgresql/data
+        - name: init-scripts
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: init-scripts
+        configMap:
+          name: bdmonedas-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data-volume
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: bdmonedas-storage-class
+      resources:
+        requests:
+          storage: 1Gi
