@@ -4,9 +4,35 @@ pipeline{
     environment {
         TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
         DB_NAMESPACE = "bdmonedas"
+        // Configurar la dirección del servidor de Kubernetes
+        KUBERNETES_SERVER = "https://kubernetes.default.svc"
     }
 
     stages {
+        stage('Verificar configuración de Kubernetes') {
+            steps {
+                script {
+                    echo "Verificando la configuración de Kubernetes..."
+
+                    // Comprobar si kubectl está instalado
+                    bat "kubectl version --client || echo 'kubectl no está instalado correctamente'"
+
+                    // Verificar la configuración actual
+                    bat "kubectl config view || echo 'No se puede acceder a la configuración de kubectl'"
+
+                    // Comprobar el contexto actual
+                    bat "kubectl config current-context || echo 'No hay contexto activo de Kubernetes'"
+
+                    // Intentar listar los nodos para ver si hay conexión
+                    bat "kubectl get nodes || echo 'No se puede conectar al cluster de Kubernetes'"
+
+                    echo "Configurando kubectl para usar el servidor correcto..."
+                    // Asegurarse de que kubectl use la configuración correcta
+                    bat "kubectl config set-cluster minikube --server=%KUBERNETES_SERVER% || echo 'No se pudo configurar el servidor'"
+                    bat "kubectl config use-context minikube || echo 'No se pudo cambiar el contexto'"
+                }
+            }
+        }
         stage('Limpiar datos previos') {
             steps {
                 script {
