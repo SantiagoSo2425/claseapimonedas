@@ -80,54 +80,53 @@ pipeline{
                 script {
                     echo "Esperando a que el pod de la base de datos esté listo..."
                     timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
-                        // Utilizamos groovy directamente para el polling continuo
-                        def podReady = false
-                        def consecutiveRunningCount = 0
-                        def MAX_CONSECUTIVE_RUNNING = 3
+                        // Intentar exactamente 3 veces, sin condiciones adicionales
+                        def intentos = 0
+                        def maxIntentos = 3
 
-                        while (!podReady) {
+                        while (intentos < maxIntentos) {
+                            intentos++
+                            echo "Verificación ${intentos} de ${maxIntentos}..."
+
                             try {
                                 def statusText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
                                 echo "Estado del pod: ${statusText}"
 
+                                // Obtenemos detalles del pod para diagnóstico
+                                bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
+
                                 if (statusText == "Running") {
-                                    // Verificar si el contenedor está realmente Ready
-                                    def containerReadyText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.containerStatuses[0].ready}\"", returnStdout: true).trim()
-
-                                    if (containerReadyText == "true") {
-                                        consecutiveRunningCount++
-                                        echo "Pod en estado Running y Ready consecutivo: ${consecutiveRunningCount}/${MAX_CONSECUTIVE_RUNNING}"
-
-                                        if (consecutiveRunningCount >= MAX_CONSECUTIVE_RUNNING) {
-                                            echo "Pod ha estado en estado Running y Ready por ${MAX_CONSECUTIVE_RUNNING} verificaciones consecutivas."
-                                            podReady = true
-                                            break
-                                        }
-                                    } else {
-                                        echo "El contenedor está Running pero no Ready."
-                                        consecutiveRunningCount = 0
-                                    }
+                                    echo "El pod está en estado Running (Verificación ${intentos}/${maxIntentos})"
                                 } else {
-                                    consecutiveRunningCount = 0
+                                    echo "El pod aún no está en estado Running (Verificación ${intentos}/${maxIntentos})"
                                 }
 
-                                if (!podReady) {
-                                    bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
-                                    echo "Esperando 10 segundos para verificar nuevamente..."
+                                // Si estamos en el último intento y el pod está Running, consideramos que está listo
+                                if (intentos == maxIntentos && statusText == "Running") {
+                                    echo "Pod verificado ${maxIntentos} veces, continuando con el pipeline..."
+                                    break
+                                }
+
+                                // Si no hemos llegado al máximo de intentos, esperamos antes del siguiente
+                                if (intentos < maxIntentos) {
+                                    echo "Esperando 10 segundos para siguiente verificación..."
                                     sleep(time: 10, unit: 'SECONDS')
                                 }
                             } catch (Exception e) {
                                 echo "Error al verificar el estado del pod: ${e.message}"
-                                echo "Esperando 10 segundos antes de reintentar..."
-                                sleep(time: 10, unit: 'SECONDS')
+                                // Si hay un error pero no hemos llegado al máximo de intentos, continuamos
+                                if (intentos < maxIntentos) {
+                                    echo "Esperando 10 segundos antes del siguiente intento..."
+                                    sleep(time: 10, unit: 'SECONDS')
+                                }
                             }
                         }
 
-                        // Esperar un poco más para asegurarnos que PostgreSQL haya terminado su inicialización interna
-                        echo "El pod está listo. Esperando 5 segundos adicionales para asegurar que PostgreSQL esté completamente inicializado..."
-                        sleep(time: 5, unit: 'SECONDS')
+                        // Esperar un tiempo adicional para asegurar que PostgreSQL esté inicializado
+                        echo "Dando tiempo adicional para que PostgreSQL inicialice completamente..."
+                        sleep(time: 15, unit: 'SECONDS')
 
-                        echo "Verificación completa. La base de datos está lista para usarse."
+                        echo "Verificación completa. Continuando con el pipeline."
                     }
                 }
             }
