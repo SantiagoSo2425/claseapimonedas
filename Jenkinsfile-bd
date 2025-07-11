@@ -82,45 +82,36 @@ pipeline{
                     timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
                         // Utilizamos groovy directamente para el polling continuo
                         def podReady = false
-                        def lastStatus = ""
                         def consecutiveRunningCount = 0
+                        def MAX_CONSECUTIVE_RUNNING = 3
 
                         while (!podReady) {
                             try {
                                 def statusText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
                                 echo "Estado del pod: ${statusText}"
 
-                                // Si el pod está en Running varias veces consecutivas, asumimos que está estable
                                 if (statusText == "Running") {
-                                    consecutiveRunningCount++
-                                    echo "Pod en estado Running consecutivo: ${consecutiveRunningCount}/3"
+                                    // Verificar si el contenedor está realmente Ready
+                                    def containerReadyText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.containerStatuses[0].ready}\"", returnStdout: true).trim()
 
-                                    // Verificamos si hay conexión a PostgreSQL directamente
-                                    try {
-                                        def pgIsReady = bat(script: "kubectl --kubeconfig=%KUBECONFIG% exec -it bdmonedas-sfs-0 -n bdmonedas -- pg_isready -U postgres", returnStatus: true)
-                                        if (pgIsReady == 0) {
-                                            echo "PostgreSQL está aceptando conexiones"
+                                    if (containerReadyText == "true") {
+                                        consecutiveRunningCount++
+                                        echo "Pod en estado Running y Ready consecutivo: ${consecutiveRunningCount}/${MAX_CONSECUTIVE_RUNNING}"
+
+                                        if (consecutiveRunningCount >= MAX_CONSECUTIVE_RUNNING) {
+                                            echo "Pod ha estado en estado Running y Ready por ${MAX_CONSECUTIVE_RUNNING} verificaciones consecutivas."
                                             podReady = true
                                             break
-                                        } else {
-                                            echo "PostgreSQL aún no está aceptando conexiones"
                                         }
-                                    } catch (Exception e) {
-                                        echo "Error al verificar pg_isready: ${e.message}"
-                                    }
-
-                                    // Si llevamos 3 verificaciones consecutivas en Running, consideramos que está listo
-                                    if (consecutiveRunningCount >= 3) {
-                                        echo "Pod ha estado en estado Running por 3 verificaciones consecutivas. Considerando que está estable."
-                                        podReady = true
-                                        break
+                                    } else {
+                                        echo "El contenedor está Running pero no Ready."
+                                        consecutiveRunningCount = 0
                                     }
                                 } else {
                                     consecutiveRunningCount = 0
                                 }
 
                                 if (!podReady) {
-                                    echo "La base de datos aún no está lista. Verificando el estado del pod..."
                                     bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
                                     echo "Esperando 10 segundos para verificar nuevamente..."
                                     sleep(time: 10, unit: 'SECONDS')
@@ -131,6 +122,10 @@ pipeline{
                                 sleep(time: 10, unit: 'SECONDS')
                             }
                         }
+
+                        // Esperar un poco más para asegurarnos que PostgreSQL haya terminado su inicialización interna
+                        echo "El pod está listo. Esperando 5 segundos adicionales para asegurar que PostgreSQL esté completamente inicializado..."
+                        sleep(time: 5, unit: 'SECONDS')
 
                         echo "Verificación completa. La base de datos está lista para usarse."
                     }
