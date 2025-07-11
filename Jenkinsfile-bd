@@ -4,11 +4,9 @@ pipeline{
     environment {
         TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
         DB_NAMESPACE = "bdmonedas"
-        // Configurar la dirección del servidor de Kubernetes - actualizar con la dirección correcta
-        KUBERNETES_SERVER = "https://192.168.49.2:8443"  // Dirección típica de Minikube
-        KUBECONFIG = "${WORKSPACE}\\kubeconfig.yaml"     // Archivo temporal para la configuración
-        // Ya no usamos credenciales de token, eliminar esta línea
-        KUBERNETES_USER = "minikube-user"
+        // Usar credenciales de Jenkins para Kubernetes
+        KUBECONFIG_CREDENTIALS = credentials('kubernetes-config')
+        KUBECONFIG = "${WORKSPACE}\\kubeconfig.yaml"  // Archivo temporal para la configuración
     }
 
     stages {
@@ -20,43 +18,10 @@ pipeline{
                     // Comprobar si kubectl está instalado
                     bat "kubectl version --client || echo 'kubectl no está instalado correctamente'"
 
-                    // Verificar si Minikube está en ejecución localmente
-                    bat "minikube status || echo 'Minikube no está en ejecución o no está instalado'"
+                    // Copiar las credenciales de Kubernetes de Jenkins al archivo temporal
+                    bat "copy %KUBECONFIG_CREDENTIALS% %KUBECONFIG%"
 
-                    // Intentar obtener la dirección IP de Minikube si está disponible
-                    bat "minikube ip || echo 'No se pudo obtener la IP de Minikube'"
-
-                    // Crear un archivo kubeconfig para conectarse al cluster
-                    // Probamos con un enfoque alternativo para la autenticación
-                    bat """
-                        echo apiVersion: v1 > %KUBECONFIG%
-                        echo kind: Config >> %KUBECONFIG%
-                        echo preferences: {} >> %KUBECONFIG%
-                        echo clusters: >> %KUBECONFIG%
-                        echo - cluster: >> %KUBECONFIG%
-                        echo     server: %KUBERNETES_SERVER% >> %KUBECONFIG%
-                        echo     insecure-skip-tls-verify: true >> %KUBECONFIG%
-                        echo   name: kubernetes >> %KUBECONFIG%
-                        echo contexts: >> %KUBECONFIG%
-                        echo - context: >> %KUBECONFIG%
-                        echo     cluster: kubernetes >> %KUBECONFIG%
-                        echo     user: kubernetes-user >> %KUBECONFIG%
-                        echo   name: kubernetes >> %KUBECONFIG%
-                        echo current-context: kubernetes >> %KUBECONFIG%
-                        echo users: >> %KUBECONFIG%
-                        echo - name: kubernetes-user >> %KUBECONFIG%
-                        echo   user: >> %KUBECONFIG%
-                        echo     client-certificate: %WORKSPACE%\\client.crt >> %KUBECONFIG%
-                        echo     client-key: %WORKSPACE%\\client.key >> %KUBECONFIG%
-                    """
-
-                    // Intentar obtener las credenciales de Minikube y copiarlas al espacio de trabajo
-                    bat """
-                        copy %USERPROFILE%\\.minikube\\profiles\\minikube\\client.crt %WORKSPACE%\\client.crt || echo No se pudo copiar el certificado
-                        copy %USERPROFILE%\\.minikube\\profiles\\minikube\\client.key %WORKSPACE%\\client.key || echo No se pudo copiar la clave
-                    """
-
-                    // Verificar la configuración creada
+                    // Verificar la configuración
                     bat "kubectl --kubeconfig=%KUBECONFIG% config view"
 
                     // Verificar conexión al cluster
