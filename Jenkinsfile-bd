@@ -80,12 +80,10 @@ pipeline{
                 script {
                     echo "Esperando a que el pod de la base de datos esté listo..."
                     timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
-                        // Utilizamos groovy directamente para el polling
+                        // Utilizamos groovy directamente para el polling continuo
                         def podReady = false
-                        def retries = 0
-                        def maxRetries = 10
 
-                        while (!podReady && retries < maxRetries) {
+                        while (!podReady) {
                             try {
                                 def statusText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
                                 echo "Estado del pod: ${statusText}"
@@ -101,19 +99,15 @@ pipeline{
                                 }
 
                                 if (!podReady) {
-                                    retries++
-                                    if (retries >= maxRetries) {
-                                        echo "Se alcanzó el número máximo de reintentos. Verificando el estado..."
-                                        bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
-                                        error "El pod de la base de datos no está listo después de ${maxRetries} intentos."
-                                    }
-                                    echo "Esperando 10 segundos para verificar nuevamente (intento ${retries} de ${maxRetries})..."
-                                    sleep(time: 10, unit: 'SECONDS')
+                                    echo "La base de datos aún no está lista. Verificando el estado del pod..."
+                                    bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
+                                    echo "Esperando 15 segundos para verificar nuevamente..."
+                                    sleep(time: 15, unit: 'SECONDS')
                                 }
                             } catch (Exception e) {
                                 echo "Error al verificar el estado del pod: ${e.message}"
-                                retries++
-                                sleep(time: 10, unit: 'SECONDS')
+                                echo "Esperando 15 segundos antes de reintentar..."
+                                sleep(time: 15, unit: 'SECONDS')
                             }
                         }
                     }
@@ -163,33 +157,27 @@ pipeline{
 
     post {
         success {
-            node(null) {
-                echo 'Pipeline de base de datos completado exitosamente'
-            }
+            echo 'Pipeline de base de datos completado exitosamente'
         }
         failure {
-            node(null) {
-                echo 'El pipeline de base de datos falló. Revisando los logs...'
-                script {
-                    bat """
-                        echo "=== Logs del pod de la base de datos ==="
-                        kubectl --kubeconfig=%KUBECONFIG% logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
+            echo 'El pipeline de base de datos falló. Revisando los logs...'
+            script {
+                bat """
+                    echo "=== Logs del pod de la base de datos ==="
+                    kubectl --kubeconfig=%KUBECONFIG% logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
 
-                        echo "=== Descripción del pod de la base de datos ==="
-                        kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
+                    echo "=== Descripción del pod de la base de datos ==="
+                    kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
 
-                        echo "=== Eventos del namespace ==="
-                        kubectl --kubeconfig=%KUBECONFIG% get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
-                    """
-                }
+                    echo "=== Eventos del namespace ==="
+                    kubectl --kubeconfig=%KUBECONFIG% get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
+                """
             }
         }
         always {
-            node(null) {
-                echo 'Limpieza de recursos temporales...'
-                // Opcionalmente, eliminar el archivo kubeconfig temporal al finalizar
-                bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
-            }
+            echo 'Limpieza de recursos temporales...'
+            // Opcionalmente, eliminar el archivo kubeconfig temporal al finalizar
+            bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
         }
     }
 }
