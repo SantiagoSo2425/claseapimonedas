@@ -4,32 +4,49 @@ pipeline{
     environment {
         TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
         DB_NAMESPACE = "bdmonedas"
-        // Configurar la dirección del servidor de Kubernetes
-        KUBERNETES_SERVER = "https://kubernetes.default.svc"
+        // Configurar la dirección del servidor de Kubernetes - actualizar con la dirección correcta
+        KUBERNETES_SERVER = "https://192.168.49.2:8443"  // Dirección típica de Minikube
+        KUBECONFIG = "${WORKSPACE}\\kubeconfig.yaml"     // Archivo temporal para la configuración
     }
 
     stages {
-        stage('Verificar configuración de Kubernetes') {
+        stage('Configurar Kubernetes') {
             steps {
                 script {
-                    echo "Verificando la configuración de Kubernetes..."
+                    echo "Configurando acceso a Kubernetes..."
 
                     // Comprobar si kubectl está instalado
                     bat "kubectl version --client || echo 'kubectl no está instalado correctamente'"
 
-                    // Verificar la configuración actual
-                    bat "kubectl config view || echo 'No se puede acceder a la configuración de kubectl'"
+                    // Crear un archivo kubeconfig básico para conectarse a Minikube
+                    bat """
+                        echo apiVersion: v1 > %KUBECONFIG%
+                        echo kind: Config >> %KUBECONFIG%
+                        echo preferences: {} >> %KUBECONFIG%
+                        echo clusters: >> %KUBECONFIG%
+                        echo - cluster: >> %KUBECONFIG%
+                        echo     server: %KUBERNETES_SERVER% >> %KUBECONFIG%
+                        echo     insecure-skip-tls-verify: true >> %KUBECONFIG%
+                        echo   name: minikube >> %KUBECONFIG%
+                        echo contexts: >> %KUBECONFIG%
+                        echo - context: >> %KUBECONFIG%
+                        echo     cluster: minikube >> %KUBECONFIG%
+                        echo     user: minikube-user >> %KUBECONFIG%
+                        echo   name: minikube >> %KUBECONFIG%
+                        echo current-context: minikube >> %KUBECONFIG%
+                        echo users: >> %KUBECONFIG%
+                        echo - name: minikube-user >> %KUBECONFIG%
+                        echo   user: {} >> %KUBECONFIG%
+                    """
 
-                    // Comprobar el contexto actual
-                    bat "kubectl config current-context || echo 'No hay contexto activo de Kubernetes'"
+                    // Verificar la configuración creada
+                    bat "kubectl --kubeconfig=%KUBECONFIG% config view"
 
-                    // Intentar listar los nodos para ver si hay conexión
-                    bat "kubectl get nodes || echo 'No se puede conectar al cluster de Kubernetes'"
+                    // Verificar conexión al cluster
+                    bat "kubectl --kubeconfig=%KUBECONFIG% cluster-info || echo 'No se puede conectar al cluster de Kubernetes'"
 
-                    echo "Configurando kubectl para usar el servidor correcto..."
-                    // Asegurarse de que kubectl use la configuración correcta
-                    bat "kubectl config set-cluster minikube --server=%KUBERNETES_SERVER% || echo 'No se pudo configurar el servidor'"
-                    bat "kubectl config use-context minikube || echo 'No se pudo cambiar el contexto'"
+                    // Intentar listar los nodos
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get nodes || echo 'No se pueden listar los nodos'"
                 }
             }
         }
@@ -38,11 +55,11 @@ pipeline{
                 script {
                     // Asegurarse de eliminar completamente el StatefulSet anterior si existe
                     bat """
-                        kubectl delete statefulset bdmonedas-sfs --namespace bdmonedas --ignore-not-found
-                        kubectl delete pvc --selector=app=bdmonedas --namespace bdmonedas --ignore-not-found
-                        kubectl delete configmap bdmonedas-config --namespace bdmonedas --ignore-not-found
-                        kubectl delete service bdmonedas-servicio --namespace bdmonedas --ignore-not-found
-                        kubectl delete persistentvolume bdmonedas-pv --ignore-not-found
+                        kubectl --kubeconfig=%KUBECONFIG% delete statefulset bdmonedas-sfs --namespace bdmonedas --ignore-not-found
+                        kubectl --kubeconfig=%KUBECONFIG% delete pvc --selector=app=bdmonedas --namespace bdmonedas --ignore-not-found
+                        kubectl --kubeconfig=%KUBECONFIG% delete configmap bdmonedas-config --namespace bdmonedas --ignore-not-found
+                        kubectl --kubeconfig=%KUBECONFIG% delete service bdmonedas-servicio --namespace bdmonedas --ignore-not-found
+                        kubectl --kubeconfig=%KUBECONFIG% delete persistentvolume bdmonedas-pv --ignore-not-found
                     """
                 }
             }
@@ -50,7 +67,7 @@ pipeline{
         stage('Crear namespace si no existe') {
             steps {
                 script {
-                    bat """ kubectl get namespace bdmonedas || kubectl create namespace bdmonedas """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% get namespace bdmonedas || kubectl --kubeconfig=%KUBECONFIG% create namespace bdmonedas """
                 }
             }
         }
@@ -58,21 +75,21 @@ pipeline{
             steps {
                 script {
                     // Aplicar el StorageClass primero si existe
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-storage-class.yaml || echo "StorageClass ya existe o no se encuentra" """
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-pv.yaml """
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-secretos.yaml """
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-init.yaml """
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-servicios.yaml """
-                    bat """ kubectl apply -f manifiestos/infraestructura/bdmonedas-sfs.yaml """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-storage-class.yaml || echo "StorageClass ya existe o no se encuentra" """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-pv.yaml """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-secretos.yaml """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-init.yaml """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-servicios.yaml """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-sfs.yaml """
                 }
             }
         }
         stage('Verificar Despliegue') {
             steps {
                 script {
-                    bat """ kubectl get pods -n bdmonedas """
-                    bat """ kubectl get services -n bdmonedas """
-                    bat """ kubectl get statefulset -n bdmonedas """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% get pods -n bdmonedas """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% get services -n bdmonedas """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% get statefulset -n bdmonedas """
                 }
             }
         }
@@ -88,11 +105,11 @@ pipeline{
 
                         while (!podReady && retries < maxRetries) {
                             try {
-                                def statusText = bat(script: "kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
+                                def statusText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.phase}\"", returnStdout: true).trim()
                                 echo "Estado del pod: ${statusText}"
 
                                 if (statusText == "Running") {
-                                    def containerReadyText = bat(script: "kubectl get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.containerStatuses[0].ready}\"", returnStdout: true).trim()
+                                    def containerReadyText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get pod bdmonedas-sfs-0 -n bdmonedas -o jsonpath=\"{.status.containerStatuses[0].ready}\"", returnStdout: true).trim()
                                     echo "Contenedor listo: ${containerReadyText}"
 
                                     if (containerReadyText == "true") {
@@ -105,7 +122,7 @@ pipeline{
                                     retries++
                                     if (retries >= maxRetries) {
                                         echo "Se alcanzó el número máximo de reintentos. Verificando el estado..."
-                                        bat "kubectl describe pod bdmonedas-sfs-0 -n bdmonedas"
+                                        bat "kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas"
                                         error "El pod de la base de datos no está listo después de ${maxRetries} intentos."
                                     }
                                     echo "Esperando 10 segundos para verificar nuevamente (intento ${retries} de ${maxRetries})..."
@@ -126,7 +143,7 @@ pipeline{
                 script {
                     echo "Verificando conexión a la base de datos PostgreSQL..."
                     bat """
-                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "SELECT 'Conexión exitosa a la base de datos' as mensaje;"
+                        kubectl --kubeconfig=%KUBECONFIG% exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "SELECT 'Conexión exitosa a la base de datos' as mensaje;"
                     """
                 }
             }
@@ -136,7 +153,7 @@ pipeline{
                 script {
                     echo "Verificando tablas creadas en la base de datos..."
                     bat """
-                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "\\dt"
+                        kubectl --kubeconfig=%KUBECONFIG% exec -it bdmonedas-sfs-0 -n bdmonedas -- psql -U postgres -d monedasdb -c "\\dt"
                     """
                 }
             }
@@ -148,8 +165,8 @@ pipeline{
                     echo "Creando backup inicial de la base de datos..."
                     bat """
                         mkdir backups 2>nul || echo "Directorio de backups ya existe"
-                        kubectl exec -it bdmonedas-sfs-0 -n bdmonedas -- pg_dump -U postgres -d monedasdb -F c -f /tmp/backup_inicial.dump
-                        kubectl cp bdmonedas/bdmonedas-sfs-0:/tmp/backup_inicial.dump backups/backup_inicial_${timestamp}.dump || echo "Error al copiar el backup"
+                        kubectl --kubeconfig=%KUBECONFIG% exec -it bdmonedas-sfs-0 -n bdmonedas -- pg_dump -U postgres -d monedasdb -F c -f /tmp/backup_inicial.dump
+                        kubectl --kubeconfig=%KUBECONFIG% cp bdmonedas/bdmonedas-sfs-0:/tmp/backup_inicial.dump backups/backup_inicial_${timestamp}.dump || echo "Error al copiar el backup"
                     """
                 }
             }
@@ -171,18 +188,20 @@ pipeline{
             script {
                 bat """
                     echo "=== Logs del pod de la base de datos ==="
-                    kubectl logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
+                    kubectl --kubeconfig=%KUBECONFIG% logs bdmonedas-sfs-0 -n bdmonedas || echo "No se pudieron obtener los logs del pod"
 
                     echo "=== Descripción del pod de la base de datos ==="
-                    kubectl describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
+                    kubectl --kubeconfig=%KUBECONFIG% describe pod bdmonedas-sfs-0 -n bdmonedas || echo "No se pudo obtener la descripción del pod"
 
                     echo "=== Eventos del namespace ==="
-                    kubectl get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
+                    kubectl --kubeconfig=%KUBECONFIG% get events -n bdmonedas || echo "No se pudieron obtener los eventos del namespace"
                 """
             }
         }
         always {
             echo 'Limpieza de recursos temporales...'
+            // Opcionalmente, eliminar el archivo kubeconfig temporal al finalizar
+            bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
         }
     }
 }
