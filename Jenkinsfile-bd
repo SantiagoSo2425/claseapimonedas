@@ -63,6 +63,11 @@ pipeline{
                     bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-init.yaml """
                     bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-servicios.yaml """
                     bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-sfs.yaml """
+
+                    // Aplicar manifiestos de utilidades RBAC
+                    echo "Aplicando permisos RBAC para mejorar la comunicación con los nodos..."
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrole.yaml || echo "ClusterRole ya existe o no se encuentra" """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrolebinding.yaml || echo "ClusterRoleBinding ya existe o no se encuentra" """
                 }
             }
         }
