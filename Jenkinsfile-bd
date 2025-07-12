@@ -65,9 +65,64 @@ pipeline{
                     bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-sfs.yaml """
 
                     // Aplicar manifiestos de utilidades RBAC
-                    //echo "Aplicando permisos RBAC para mejorar la comunicación con los nodos..."
-                    //bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrole.yaml || echo "ClusterRole ya existe o no se encuentra" """
-                    //bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrolebinding.yaml || echo "ClusterRoleBinding ya existe o no se encuentra" """
+                    echo "Aplicando permisos RBAC para mejorar la comunicación con los nodos..."
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrole.yaml || echo "ClusterRole ya existe o no se encuentra" """
+                    bat """ kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/utils/kube-apiserver-to-kubelet-clusterrolebinding.yaml || echo "ClusterRoleBinding ya existe o no se encuentra" """
+                }
+            }
+        }
+        stage('Configurar acceso externo a la BD') {
+            steps {
+                script {
+                    echo "Configurando servicio NodePort para acceso externo a PostgreSQL..."
+
+                    // Crear un archivo YAML temporal para el servicio NodePort
+                    bat """
+                    (
+                    echo apiVersion: v1
+                    echo kind: Service
+                    echo metadata:
+                    echo   name: bdmonedas-nodeport
+                    echo   namespace: bdmonedas
+                    echo spec:
+                    echo   type: NodePort
+                    echo   ports:
+                    echo   - port: 5432
+                    echo     targetPort: 5432
+                    echo     nodePort: 5433
+                    echo   selector:
+                    echo     app: bdmonedas
+                    ) > bdmonedas-nodeport-service.yaml
+                    """
+
+                    // Aplicar el servicio NodePort
+                    bat "kubectl --kubeconfig=%KUBECONFIG% apply -f bdmonedas-nodeport-service.yaml"
+
+                    // Obtener la dirección IP del nodo para mostrar instrucciones de conexión
+                    echo "Obteniendo información de acceso a la base de datos..."
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get service bdmonedas-nodeport -n bdmonedas"
+
+                    echo """
+                    =================================================================
+                    INSTRUCCIONES PARA CONECTARSE A LA BASE DE DATOS DESDE PGADMIN:
+
+                    1. Abra pgAdmin
+                    2. Haga clic derecho en 'Servers' y seleccione 'Create' > 'Server...'
+                    3. En la pestaña 'General':
+                       - Name: BDMonedas Kubernetes
+
+                    4. En la pestaña 'Connection':
+                       - Host: localhost (o 127.0.0.1)
+                       - Port: 5433
+                       - Maintenance database: monedasdb
+                       - Username: postgres
+                       - Password: sa
+
+                    5. Haga clic en 'Save'
+
+                    La base de datos ahora está accesible en: localhost:5433
+                    =================================================================
+                    """
                 }
             }
         }
