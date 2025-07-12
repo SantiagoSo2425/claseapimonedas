@@ -89,7 +89,7 @@ pipeline{
                     echo   ports:
                     echo   - port: 5432
                     echo     targetPort: 5432
-                    echo     nodePort: 5433
+                    echo     nodePort: 30543
                     echo   selector:
                     echo     app: bdmonedas
                     ) > bdmonedas-nodeport-service.yaml
@@ -113,14 +113,14 @@ pipeline{
 
                     4. En la pestaña 'Connection':
                        - Host: localhost (o 127.0.0.1)
-                       - Port: 5433
+                       - Port: 30543
                        - Maintenance database: monedasdb
                        - Username: postgres
                        - Password: sa
 
                     5. Haga clic en 'Save'
 
-                    La base de datos ahora está accesible en: localhost:5433
+                    La base de datos ahora está accesible en: localhost:30543
                     =================================================================
                     """
                 }
