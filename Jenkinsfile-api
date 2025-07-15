@@ -1,12 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        // Configurar la herramienta JDK en Jenkins (asegúrate de que esté configurada en Jenkins)
-        jdk 'JDK17'
-        maven 'Maven3'
-    }
-
     environment {
         // Configuración de Docker
         DOCKER_HUB_CREDENTIALS = 'dockerhub-credentials'
@@ -19,16 +13,12 @@ pipeline {
         NAMESPACE_API = 'apimonedas'
         NAMESPACE_BD = 'bdmonedas'
         TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
-
-        // Configuración de Java
-        JAVA_HOME = tool 'JDK17'
-        PATH = "${tool 'JDK17'}/bin:${tool 'Maven3'}/bin:${env.PATH}"
     }
 
     stages {
         stage('Verificar versión de Java') {
             steps {
-                // Verificar la versión de Java para confirmar que estamos usando JDK 17
+                // Verificar la versión de Java y Maven disponibles
                 bat 'java -version'
                 bat 'mvn -version'
             }
@@ -65,7 +55,7 @@ pipeline {
 
         stage('Build') {
             steps {
-                // Utilizar Maven con la versión de Java correcta
+                // Utilizar Maven con opciones para usar JDK más reciente si está disponible
                 bat 'mvn clean package -DskipTests'
             }
         }
