@@ -1,0 +1,217 @@
+﻿pipeline {
+    agent any
+
+    environment {
+        // Configuración de Docker
+        DOCKER_HUB_CREDENTIALS = 'dockerhub-credentials'
+        DOCKER_IMAGE = 'santiagosuarezosorio/apimonedastt'
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+
+        // Configuración de Kubernetes
+        KUBECONFIG_CREDENTIALS = credentials('kubernetes-config')
+        KUBECONFIG = "${WORKSPACE}\\kubeconfig.yaml"  // Archivo temporal para la configuración
+        NAMESPACE_API = 'apimonedas'
+        NAMESPACE_BD = 'bdmonedas'
+        TIMEOUT_MINUTES = 5  // Tiempo máximo de espera para que los pods estén listos
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Configurar Kubernetes') {
+            steps {
+                script {
+                    echo "Configurando acceso a Kubernetes..."
+
+                    // Comprobar si kubectl está instalado
+                    bat "kubectl version --client || echo 'kubectl no está instalado correctamente'"
+
+                    // Copiar las credenciales de Kubernetes de Jenkins al archivo temporal
+                    bat "copy %KUBECONFIG_CREDENTIALS% %KUBECONFIG%"
+
+                    // Verificar la configuración
+                    bat "kubectl --kubeconfig=%KUBECONFIG% config view"
+
+                    // Verificar conexión al cluster
+                    bat "kubectl --kubeconfig=%KUBECONFIG% cluster-info || echo 'No se puede conectar al cluster de Kubernetes'"
+
+                    // Intentar listar los nodos
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get nodes || echo 'No se pueden listar los nodos'"
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                // Compilar la aplicación con Maven
+                bat 'mvnw clean package -DskipTests'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                // Construir la imagen Docker
+                bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -t ${DOCKER_IMAGE}:latest ."
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                // Autenticarse en Docker Hub y subir la imagen
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_HUB_CREDENTIALS}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    bat "docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
+                    bat "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    bat "docker push ${DOCKER_IMAGE}:latest"
+                }
+            }
+        }
+
+        stage('Crear Namespaces') {
+            steps {
+                script {
+                    // Verificar si los namespaces existen, si no, crearlos
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get namespace ${NAMESPACE_BD} || kubectl --kubeconfig=%KUBECONFIG% create namespace ${NAMESPACE_BD}"
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get namespace ${NAMESPACE_API} || kubectl --kubeconfig=%KUBECONFIG% create namespace ${NAMESPACE_API}"
+                }
+            }
+        }
+
+        stage('Deploy Secrets') {
+            steps {
+                // Aplicar Secrets
+                bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-secretos.yaml"
+            }
+        }
+
+        stage('Deploy ConfigMaps') {
+            steps {
+                // Aplicar ConfigMaps
+                bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-cm.yaml"
+            }
+        }
+
+        stage('Deploy API to Kubernetes') {
+            steps {
+                script {
+                    // Actualizar la imagen en el archivo de despliegue
+                    bat """
+                        powershell -Command "(Get-Content manifiestos/api/apimonedas-despliegue.yaml) -replace 'image: santiagosuarezosorio/apimonedastt:.*', 'image: santiagosuarezosorio/apimonedastt:${DOCKER_TAG}' | Set-Content manifiestos/api/apimonedas-despliegue.yaml"
+                    """
+
+                    // Desplegar la aplicación
+                    bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-despliegue.yaml"
+                    bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-servicio.yaml"
+                    bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-hpa.yaml"
+
+                    // Esperar a que el despliegue esté listo
+                    bat "kubectl --kubeconfig=%KUBECONFIG% rollout status deployment/apimonedas-despliegue -n ${NAMESPACE_API} --timeout=${TIMEOUT_MINUTES}m"
+                }
+            }
+        }
+
+        stage('Esperar a que la API esté lista') {
+            steps {
+                script {
+                    echo "Esperando a que los pods de la API estén listos..."
+                    timeout(time: env.TIMEOUT_MINUTES, unit: 'MINUTES') {
+                        // Intentar exactamente 3 veces
+                        def intentos = 0
+                        def maxIntentos = 3
+
+                        while (intentos < maxIntentos) {
+                            intentos++
+                            echo "Verificación ${intentos} de ${maxIntentos}..."
+
+                            try {
+                                def podsReadyText = bat(script: "kubectl --kubeconfig=%KUBECONFIG% get deployment apimonedas-despliegue -n ${NAMESPACE_API} -o jsonpath=\"{.status.readyReplicas}\"", returnStdout: true).trim()
+                                echo "Pods listos: ${podsReadyText}"
+
+                                // Obtener detalles del despliegue para diagnóstico
+                                bat "kubectl --kubeconfig=%KUBECONFIG% describe deployment apimonedas-despliegue -n ${NAMESPACE_API}"
+
+                                // Verificar si hay al menos un pod listo
+                                if (podsReadyText && podsReadyText.toInteger() > 0) {
+                                    echo "Al menos un pod está listo (Verificación ${intentos}/${maxIntentos})"
+                                } else {
+                                    echo "No hay pods listos todavía (Verificación ${intentos}/${maxIntentos})"
+                                }
+
+                                // Si estamos en el último intento y hay pods listos, consideramos que está listo
+                                if (intentos == maxIntentos && podsReadyText && podsReadyText.toInteger() > 0) {
+                                    echo "Pods verificados ${maxIntentos} veces, continuando con el pipeline..."
+                                    break
+                                }
+
+                                // Si no hemos llegado al máximo de intentos, esperamos antes del siguiente
+                                if (intentos < maxIntentos) {
+                                    echo "Esperando 10 segundos para siguiente verificación..."
+                                    sleep(time: 10, unit: 'SECONDS')
+                                }
+                            } catch (Exception e) {
+                                echo "Error al verificar el estado de los pods: ${e.message}"
+                                if (intentos < maxIntentos) {
+                                    echo "Esperando 10 segundos antes del siguiente intento..."
+                                    sleep(time: 10, unit: 'SECONDS')
+                                }
+                            }
+                        }
+
+                        // Esperar un tiempo adicional para asegurar que la API esté inicializada
+                        echo "Dando tiempo adicional para que la API inicialice completamente..."
+                        sleep(time: 15, unit: 'SECONDS')
+
+                        echo "Verificación completa. Continuando con el pipeline."
+                    }
+                }
+            }
+        }
+
+        stage('Verificar Deployment') {
+            steps {
+                script {
+                    // Obtener información sobre los pods y servicios
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get pods -n ${NAMESPACE_API}"
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get svc -n ${NAMESPACE_API}"
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get hpa -n ${NAMESPACE_API}"
+
+                    // Mostrar eventos del namespace para diagnóstico
+                    bat "kubectl --kubeconfig=%KUBECONFIG% get events -n ${NAMESPACE_API} --sort-by='.lastTimestamp'"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline ejecutado correctamente. La API de monedas ha sido desplegada en Kubernetes.'
+        }
+        failure {
+            echo 'El pipeline ha fallado. Revise los logs para más detalles.'
+            script {
+                bat """
+                    echo "=== Logs de los pods de la API ==="
+                    kubectl --kubeconfig=%KUBECONFIG% logs -l app=apimonedas -n ${NAMESPACE_API} --tail=100 || echo "No se pudieron obtener los logs de los pods"
+
+                    echo "=== Descripción del despliegue ==="
+                    kubectl --kubeconfig=%KUBECONFIG% describe deployment apimonedas-despliegue -n ${NAMESPACE_API} || echo "No se pudo obtener la descripción del despliegue"
+
+                    echo "=== Eventos del namespace ==="
+                    kubectl --kubeconfig=%KUBECONFIG% get events -n ${NAMESPACE_API} --sort-by='.lastTimestamp' || echo "No se pudieron obtener los eventos del namespace"
+                """
+            }
+        }
+        always {
+            echo 'Limpieza de recursos temporales...'
+            // Limpiar imágenes Docker locales para ahorrar espacio
+            bat "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || true"
+            bat "docker rmi ${DOCKER_IMAGE}:latest || true"
+
+            // Eliminar el archivo kubeconfig temporal al finalizar
+            bat "del %KUBECONFIG% || echo El archivo de configuración ya no existe"
+        }
+    }
+}

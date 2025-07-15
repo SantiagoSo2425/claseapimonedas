@@ -1,0 +1,38 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apimonedas-despliegue
+  namespace: apimonedas
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: apimonedas
+  template:
+    metadata:
+      labels:
+        app: apimonedas
+    spec:
+      containers:
+        - name: apimonedas
+          image: santiagosuarezosorio/apimonedastt:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: URL_DB_MONEDAS
+              valueFrom:
+                configMapKeyRef:
+                  name: apimonedas-cm
+                  key: URL_DB_MONEDAS
+            - name: USER_DB_MONEDAS
+              valueFrom:
+                configMapKeyRef:
+                  name: apimonedas-cm
+                  key: USER_DB_MONEDAS
+            - name: PASSWORD_DB_MONEDAS
+              valueFrom:
+                secretKeyRef:
+                  name: bdmonedas-secretos
+                  key: db-password
+          imagePullPolicy: Always
+      restartPolicy: Always
