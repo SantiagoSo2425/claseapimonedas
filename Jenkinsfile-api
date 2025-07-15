@@ -25,19 +25,6 @@ pipeline {
                 // Verificar la versión de Java y Maven disponibles
                 bat 'java -version'
                 bat 'mvn -version'
-
-                // Verificar si estamos usando Java 8
-                script {
-                    def javaVersion = bat(script: 'java -version 2>&1 | findstr "version"', returnStdout: true).trim()
-                    echo "Java version detected: ${javaVersion}"
-
-                    // Verificar si contiene "1.8" que indica Java 8
-                    if (javaVersion.contains("1.8")) {
-                        echo "Detectada versión de Java 8. Ajustando la configuración para compatibilidad..."
-                        // Establecer propiedad para usar una versión compatible del plugin de Spring Boot
-                        env.JAVA8_COMPATIBILITY = "true"
-                    }
-                }
             }
         }
 
@@ -72,15 +59,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                script {
-                    if (env.JAVA8_COMPATIBILITY == "true") {
-                        // Si estamos en Java 8, usar una versión compatible del plugin de Spring Boot
-                        bat 'mvn clean package -DskipTests -Dspring-boot.repackage.skip=true'
-                    } else {
-                        // Si tenemos Java 17+, podemos usar el plugin normalmente
-                        bat 'mvn clean package -DskipTests'
-                    }
-                }
+                // Construir con Maven
+                bat 'mvn clean package -DskipTests'
             }
         }
 
