@@ -59,9 +59,16 @@ pipeline {
 
         stage('Build') {
             steps {
-                // Usar Docker para compilar con JDK
+                // Limpiar directorio target manualmente antes de compilar
+                bat 'if exist dominio\\target rmdir /s /q dominio\\target'
+                bat 'if exist core\\target rmdir /s /q core\\target'
+                bat 'if exist infraestructura\\target rmdir /s /q infraestructura\\target'
+                bat 'if exist aplicacion\\target rmdir /s /q aplicacion\\target'
+                bat 'if exist presentacion\\target rmdir /s /q presentacion\\target'
+
+                // Usar Docker para compilar con JDK con permisos adecuados
                 bat '''
-                    docker run --rm -v %CD%:/app -w /app maven:3.8-openjdk-8 mvn clean package -DskipTests
+                    docker run --rm -v %CD%:/app -w /app maven:3.8-openjdk-8 mvn package -DskipTests -Dmaven.clean.skip=true
                 '''
             }
         }
