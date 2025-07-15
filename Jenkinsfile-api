@@ -59,8 +59,10 @@ pipeline {
 
         stage('Build') {
             steps {
-                // Construir con Maven
-                bat 'mvn clean package -DskipTests'
+                // Usar Docker para compilar con JDK
+                bat '''
+                    docker run --rm -v %CD%:/app -w /app maven:3.8-openjdk-8 mvn clean package -DskipTests
+                '''
             }
         }
 
