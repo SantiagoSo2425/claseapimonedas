@@ -89,7 +89,7 @@ pipeline{
                         kubectl delete secret bdmonedas-secretos --ignore-not-found -n apimonedas
 
                         echo "Esperando que los recursos se eliminen completamente..."
-                        timeout /t 10
+                        ping 127.0.0.1 -n 11 > nul
                         echo "✅ Recursos previos limpiados"
                     """
                 }
