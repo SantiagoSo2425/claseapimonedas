@@ -1,7 +1,7 @@
 package monedas.api.dominio.entidades;
 
 import org.hibernate.annotations.GenericGenerator;
-import jakarta.persistence.*;
+import javax.persistence.*;
 
 @Entity
 @Table(name="moneda")
@@ -77,4 +77,3 @@ public class Moneda {
     }
 
 }
-

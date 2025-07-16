@@ -3,7 +3,7 @@ package monedas.api.dominio.entidades;
 import java.sql.Date;
 
 import org.hibernate.annotations.GenericGenerator;
-import jakarta.persistence.*;
+import javax.persistence.*;
 
 @Entity
 @Table(name = "cambiomoneda")
@@ -59,4 +59,3 @@ public class CambioMoneda {
     }
 
 }
-
