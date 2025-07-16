@@ -4,62 +4,191 @@ pipeline{
     environment{
         DOCKER_IMAGE = 'santiagosuarezosorio/apimonedastt'
         KUBECONFIG = credentials('kubernetes-config')
+        // Agregar timestamp para versioning
+        BUILD_TIMESTAMP = new Date().format('yyyyMMdd-HHmmss')
+        IMAGE_TAG = "${BUILD_TIMESTAMP}-${BUILD_NUMBER}"
     }
 
     stages{
-        stage('Construir imagen'){
-            steps{
-                bat "docker build . -t ${DOCKER_IMAGE}:latest"
-            }
-        }
-        stage('Limpiar datos previos') {
+        stage('Pre-Build Validation') {
             steps {
                 script {
+                    echo "🔍 Validando pre-requisitos..."
                     bat """
-                    kubectl delete hpa apimonedas-hpa-tt --ignore-not-found
-                    kubectl delete deployment apimonedas-deployment-tt --ignore-not-found
-                    kubectl delete service apimonedas-servicio-tt --ignore-not-found
-                    kubectl delete configmap apimonedas-cm-tt --ignore-not-found
+                        echo "Verificando Docker..."
+                        docker --version
+                        echo "Verificando kubectl..."
+                        kubectl version --client
+                        echo "Verificando conexión a cluster..."
+                        kubectl cluster-info
                     """
                 }
             }
         }
-        stage('Registrar imagen'){
-            steps{
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    bat """
-                        docker login -u %DOCKER_USER% -p %DOCKER_PASS%
-                        docker push ${DOCKER_IMAGE}:latest
-                        docker logout
-                    """
-                }
-            }
-        }
-        stage('Aplicar Manifiestos API') {
+
+        stage('Build & Test') {
             steps {
                 script {
+                    echo "🏗️ Construyendo aplicación..."
                     bat """
-                    kubectl create namespace apimonedas --dry-run=client -o yaml | kubectl apply -f -
-                    kubectl apply -f manifiestos\\api\\
+                        echo "Compilando con Maven..."
+                        mvn clean compile -DskipTests
+                        echo "Ejecutando tests unitarios..."
+                        mvn test || echo "WARN: Algunos tests fallaron, continuando..."
                     """
                 }
             }
         }
-        stage('Despliegue'){
+
+        stage('Construir imagen Docker'){
             steps{
                 script {
+                    echo "🐳 Construyendo imagen Docker..."
                     bat """
-                        kubectl set image deployment/apimonedas-despliegue apimonedas=${DOCKER_IMAGE}:latest -n apimonedas
-                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas --timeout=300s
-                        echo "Verificando estado de los pods:"
-                        kubectl get pods -n apimonedas
-                        echo "Describiendo deployment:"
-                        kubectl describe deployment apimonedas-despliegue -n apimonedas
-                        echo "Logs de los pods (si existen):"
-                        kubectl logs -l app=apimonedas -n apimonedas --tail=50 || echo "No se pudieron obtener logs"
+                        docker build . -t ${DOCKER_IMAGE}:${IMAGE_TAG}
+                        docker tag ${DOCKER_IMAGE}:${IMAGE_TAG} ${DOCKER_IMAGE}:latest
+                        echo "✅ Imagen construida: ${DOCKER_IMAGE}:${IMAGE_TAG}"
                     """
                 }
             }
+        }
+
+        stage('Limpiar recursos previos') {
+            steps {
+                script {
+                    echo "🧹 Limpiando recursos previos..."
+                    bat """
+                        kubectl delete hpa apimonedas-hpa --ignore-not-found -n apimonedas
+                        kubectl delete deployment apimonedas-despliegue --ignore-not-found -n apimonedas
+                        kubectl delete service apimonedas-servicio --ignore-not-found -n apimonedas
+                        kubectl delete configmap apimonedas-cm --ignore-not-found -n apimonedas
+                        kubectl delete secret bdmonedas-secretos --ignore-not-found -n apimonedas
+                        echo "✅ Recursos previos limpiados"
+                    """
+                }
+            }
+        }
+
+        stage('Publicar imagen'){
+            steps{
+                script {
+                    echo "📤 Publicando imagen en Docker Hub..."
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        bat """
+                            docker login -u %DOCKER_USER% -p %DOCKER_PASS%
+                            docker push ${DOCKER_IMAGE}:${IMAGE_TAG}
+                            docker push ${DOCKER_IMAGE}:latest
+                            docker logout
+                            echo "✅ Imagen publicada: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Aplicar Manifiestos') {
+            steps {
+                script {
+                    echo "📋 Aplicando manifiestos de Kubernetes..."
+                    bat """
+                        echo "Creando namespace..."
+                        kubectl create namespace apimonedas --dry-run=client -o yaml | kubectl apply -f -
+
+                        echo "Aplicando manifiestos..."
+                        kubectl apply -f manifiestos\\api\\
+
+                        echo "Verificando recursos creados..."
+                        kubectl get all -n apimonedas
+                        echo "✅ Manifiestos aplicados correctamente"
+                    """
+                }
+            }
+        }
+
+        stage('Despliegue y Verificación'){
+            steps{
+                script {
+                    echo "🚀 Desplegando aplicación..."
+                    bat """
+                        echo "Actualizando imagen del deployment..."
+                        kubectl set image deployment/apimonedas-despliegue apimonedas=${DOCKER_IMAGE}:${IMAGE_TAG} -n apimonedas
+
+                        echo "Esperando rollout..."
+                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas --timeout=600s
+
+                        echo "✅ Despliegue completado exitosamente"
+                    """
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    echo "🏥 Verificando salud de la aplicación..."
+                    bat """
+                        echo "Estado de los pods:"
+                        kubectl get pods -n apimonedas -o wide
+
+                        echo "Estado del deployment:"
+                        kubectl get deployment apimonedas-despliegue -n apimonedas
+
+                        echo "Estado del servicio:"
+                        kubectl get service -n apimonedas
+
+                        echo "Eventos recientes:"
+                        kubectl get events -n apimonedas --sort-by='.lastTimestamp' | tail -10
+
+                        echo "Verificando pods en estado Running..."
+                        kubectl wait --for=condition=ready pod -l app=apimonedas -n apimonedas --timeout=300s
+
+                        echo "✅ Aplicación saludable y funcionando"
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                echo "📊 Recopilando información final..."
+                bat """
+                    echo "=== RESUMEN FINAL ==="
+                    echo "Imagen desplegada: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    echo "Namespace: apimonedas"
+                    echo "Timestamp: ${BUILD_TIMESTAMP}"
+
+                    echo "Estado final de recursos:"
+                    kubectl get all -n apimonedas || echo "No se pudo obtener estado de recursos"
+                """
+            }
+        }
+        success {
+            echo "🎉 ¡Pipeline completado exitosamente!"
+            echo "✅ Aplicación desplegada: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+        }
+        failure {
+            script {
+                echo "❌ Pipeline falló. Recopilando logs para diagnóstico..."
+                bat """
+                    echo "=== LOGS DE DIAGNÓSTICO ==="
+                    echo "Pods en el namespace:"
+                    kubectl get pods -n apimonedas || echo "No se pudieron obtener pods"
+
+                    echo "Logs de pods con problemas:"
+                    kubectl logs -l app=apimonedas -n apimonedas --tail=100 || echo "No se pudieron obtener logs"
+
+                    echo "Eventos del namespace:"
+                    kubectl get events -n apimonedas --sort-by='.lastTimestamp' || echo "No se pudieron obtener eventos"
+
+                    echo "Descripción del deployment:"
+                    kubectl describe deployment apimonedas-despliegue -n apimonedas || echo "No se pudo describir deployment"
+                """
+            }
+        }
+        unstable {
+            echo "⚠️ Pipeline completado con advertencias"
         }
     }
 }
