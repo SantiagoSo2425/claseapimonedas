@@ -4,5 +4,5 @@ metadata:
   name: apimonedas-cm
   namespace: apimonedas
 data:
-    URL_DB_MONEDAS: jdbc:postgresql://bdmonedas-servicio.bdmonedas.svc.cluster.local:5432/monedas
+    URL_DB_MONEDAS: jdbc:postgresql://bdmonedas-servicio.bdmonedas.svc.cluster.local:5432/monedasdb
     USER_DB_MONEDAS: postgres
