@@ -4,131 +4,54 @@ pipeline{
     environment{
         DOCKER_IMAGE = 'santiagosuarezosorio/apimonedastt'
         KUBECONFIG = credentials('kubernetes-config')
-        NAMESPACE_API = 'apimonedas'
-        NAMESPACE_BD = 'bdmonedas'
     }
 
     stages{
-        stage('Verificar versión de Java') {
-            steps {
-                // Verificar la versión de Java y Maven disponibles
-                bat 'java -version'
-                bat 'mvn -version'
-            }
-        }
-
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
-        stage('Build') {
-            steps {
-                // Limpiar directorio target manualmente antes de compilar
-                bat 'if exist dominio\\target rmdir /s /q dominio\\target'
-                bat 'if exist core\\target rmdir /s /q core\\target'
-                bat 'if exist infraestructura\\target rmdir /s /q infraestructura\\target'
-                bat 'if exist aplicacion\\target rmdir /s /q aplicacion\\target'
-                bat 'if exist presentacion\\target rmdir /s /q presentacion\\target'
-
-                // Usar Docker para compilar con JDK con permisos adecuados
-                bat '''
-                    docker run --rm -v %CD%:/app -w /app maven:3.8-openjdk-8 mvn package -DskipTests -Dmaven.clean.skip=true
-                '''
-            }
-        }
-
         stage('Construir imagen'){
             steps{
                 bat "docker build . -t ${DOCKER_IMAGE}"
             }
         }
-
         stage('Limpiar datos previos') {
             steps {
                 script {
                     bat """
-                    kubectl --kubeconfig=%KUBECONFIG% get namespace ${NAMESPACE_API} || kubectl --kubeconfig=%KUBECONFIG% create namespace ${NAMESPACE_API}
-                    kubectl --kubeconfig=%KUBECONFIG% get namespace ${NAMESPACE_BD} || kubectl --kubeconfig=%KUBECONFIG% create namespace ${NAMESPACE_BD}
-                    kubectl --kubeconfig=%KUBECONFIG% delete hpa apimonedas-hpa -n ${NAMESPACE_API} --ignore-not-found
-                    kubectl --kubeconfig=%KUBECONFIG% delete deployment apimonedas-despliegue -n ${NAMESPACE_API} --ignore-not-found
-                    kubectl --kubeconfig=%KUBECONFIG% delete service apimonedas-servicio -n ${NAMESPACE_API} --ignore-not-found
-                    kubectl --kubeconfig=%KUBECONFIG% delete configmap apimonedas-cm -n ${NAMESPACE_API} --ignore-not-found
+                    kubectl delete hpa apimonedas-hpa-tt --ignore-not-found
+                    kubectl delete deployment apimonedas-deployment-tt --ignore-not-found
+                    kubectl delete service apimonedas-servicio-tt --ignore-not-found
+                    kubectl delete configmap apimonedas-cm-tt --ignore-not-found
                     """
                 }
             }
         }
-
         stage('Registrar imagen'){
             steps{
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     bat """
-                        docker login -u %DOCKER_USER% -p %DOCKER_PASS%
                         docker push ${DOCKER_IMAGE}
                         docker logout
                     """
                 }
             }
         }
-
-        stage('Deploy Secrets') {
-            steps {
-                // Aplicar Secrets
-                bat "kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/infraestructura/bdmonedas-secretos.yaml"
-            }
-        }
-
         stage('Aplicar Manifiestos API') {
             steps {
                 script {
                     bat """
-                    kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-cm.yaml -n ${NAMESPACE_API}
-                    kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-despliegue.yaml -n ${NAMESPACE_API}
-                    kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-servicio.yaml -n ${NAMESPACE_API}
-                    kubectl --kubeconfig=%KUBECONFIG% apply -f manifiestos/api/apimonedas-hpa.yaml -n ${NAMESPACE_API}
+                    kubectl apply -f _manifiestos\\api\\
                     """
                 }
             }
         }
-
-        stage('Verificar Deployment') {
-            steps {
+        stage('Despliegue'){
+            steps{
                 script {
                     bat """
-                        kubectl --kubeconfig=%KUBECONFIG% rollout status deployment/apimonedas-despliegue -n ${NAMESPACE_API}
-                        kubectl --kubeconfig=%KUBECONFIG% get pods -n ${NAMESPACE_API}
-                        kubectl --kubeconfig=%KUBECONFIG% get svc -n ${NAMESPACE_API}
-                        kubectl --kubeconfig=%KUBECONFIG% get hpa -n ${NAMESPACE_API}
+                        kubectl set image deployment/apimonedas-deployment-tt ${DOCKER_IMAGE} --record
+                        kubectl rollout status deployment/apimonedas-deployment-tt
                     """
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo 'Pipeline ejecutado correctamente. La API de monedas ha sido desplegada en Kubernetes.'
-        }
-        failure {
-            echo 'El pipeline ha fallado. Revise los logs para más detalles.'
-            script {
-                bat """
-                    echo "=== Logs de los pods de la API ==="
-                    kubectl --kubeconfig=%KUBECONFIG% logs -l app=apimonedas -n ${NAMESPACE_API} --tail=100 || echo "No se pudieron obtener los logs de los pods"
-
-                    echo "=== Descripción del despliegue ==="
-                    kubectl --kubeconfig=%KUBECONFIG% describe deployment apimonedas-despliegue -n ${NAMESPACE_API} || echo "No se pudo obtener la descripción del despliegue"
-
-                    echo "=== Eventos del namespace ==="
-                    kubectl --kubeconfig=%KUBECONFIG% get events -n ${NAMESPACE_API} --sort-by='.lastTimestamp' || echo "No se pudieron obtener los eventos del namespace"
-                """
-            }
-        }
-        always {
-            echo 'Limpieza de recursos temporales...'
-            // Limpiar imágenes Docker locales para ahorrar espacio
-            bat "docker rmi ${DOCKER_IMAGE} || echo \"No se pudo eliminar la imagen ${DOCKER_IMAGE}\""
         }
     }
 }
