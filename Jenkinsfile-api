@@ -39,7 +39,7 @@ pipeline{
             steps {
                 script {
                     bat """
-                    kubectl apply -f _manifiestos\\api\\
+                    kubectl apply -f manifiestos\\api\\
                     """
                 }
             }
