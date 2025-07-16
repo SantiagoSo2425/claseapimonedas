@@ -140,8 +140,17 @@ pipeline{
                         echo "Actualizando imagen del deployment..."
                         kubectl set image deployment/apimonedas-despliegue apimonedas=${DOCKER_IMAGE}:${IMAGE_TAG} -n apimonedas
 
-                        echo "Esperando rollout (con timeout extendido)..."
-                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas --timeout=900s
+                        echo "Verificando estado inicial..."
+                        kubectl get pods -n apimonedas
+
+                        echo "Esperando rollout con timeout de 300s (5 minutos)..."
+                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas --timeout=300s || (
+                            echo "⚠️ Rollout no completado en tiempo esperado, verificando estado..."
+                            kubectl get pods -n apimonedas
+                            kubectl describe deployment apimonedas-despliegue -n apimonedas
+                            kubectl logs -l app=apimonedas -n apimonedas --tail=30 --all-containers=true || echo "No se pudieron obtener logs"
+                            exit 1
+                        )
 
                         echo "✅ Despliegue completado exitosamente"
                     """
