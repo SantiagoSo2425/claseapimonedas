@@ -26,7 +26,7 @@ public class PaisServicio implements IPaisServicio {
 
     @Override
     public Pais obtener(Long id) {
-        var pais = repositorio.findById(id);
+        Optional<Pais> pais = repositorio.findById(id);
         return pais.isEmpty() ? null : pais.get();
     }
 

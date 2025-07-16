@@ -38,7 +38,7 @@ public class UsuarioServicio implements IUsuarioServicio {
 
     @Override
     public Usuario obtener(Long id) {
-        var usuario = repositorio.findById(id);
+        Optional<Usuario> usuario = repositorio.findById(id);
         return usuario.isEmpty() ? null : usuario.get();
     }
 

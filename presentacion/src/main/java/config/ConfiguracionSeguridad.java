@@ -34,15 +34,15 @@ public class ConfiguracionSeguridad {
                 .cors(Customizer.withDefaults()) // Activa CORS
                 .authorizeHttpRequests(
                         (authz) -> authz
-                                .requestMatchers("/api/usuarios/validar/**").permitAll()
-                                .requestMatchers(
+                                .antMatchers("/api/usuarios/validar/**").permitAll()
+                                .antMatchers(
                                         "/swagger-ui/**",
                                         "/v3/api-docs/**",
                                         "/swagger-ui.html",
                                         "/swagger-resources/**",
                                         "/webjars/**")
                                 .permitAll()
-                                // .requestMatchers("/api/monedas/**").permitAll()
+                                // .antMatchers("/api/monedas/**").permitAll()
                                 .anyRequest().authenticated())
                 .addFilterAfter(filtro, UsernamePasswordAuthenticationFilter.class)
                 .build();

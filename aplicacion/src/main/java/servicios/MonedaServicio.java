@@ -29,7 +29,7 @@ public MonedaServicio(IMonedaRepositorio repositorio,
 
     @Override
     public Moneda obtener(Long id){
-        var moneda = repositorio.findById(id);
+        Optional<Moneda> moneda = repositorio.findById(id);
         return moneda.isEmpty()? null : moneda.get();
      }
 
