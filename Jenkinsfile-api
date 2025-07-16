@@ -50,7 +50,13 @@ pipeline{
                 script {
                     bat """
                         kubectl set image deployment/apimonedas-despliegue apimonedas=${DOCKER_IMAGE}:latest -n apimonedas
-                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas
+                        kubectl rollout status deployment/apimonedas-despliegue -n apimonedas --timeout=300s
+                        echo "Verificando estado de los pods:"
+                        kubectl get pods -n apimonedas
+                        echo "Describiendo deployment:"
+                        kubectl describe deployment apimonedas-despliegue -n apimonedas
+                        echo "Logs de los pods (si existen):"
+                        kubectl logs -l app=apimonedas -n apimonedas --tail=50 || echo "No se pudieron obtener logs"
                     """
                 }
             }
