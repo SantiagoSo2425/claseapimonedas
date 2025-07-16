@@ -4,9 +4,9 @@ pipeline{
     environment{
         DOCKER_IMAGE = 'santiagosuarezosorio/apimonedastt'
         KUBECONFIG = credentials('kubernetes-config')
-        // Configurar JAVA_HOME para usar JDK
-        JAVA_HOME = 'C:\Program Files\Java\jdk-21'
-        PATH = "${JAVA_HOME}\\bin;${env.PATH}"
+        // Configurar JAVA_HOME para usar JDK (usando forward slashes o doble backslash)
+        JAVA_HOME = 'C:/Program Files/Java/jdk-21'
+        PATH = "${JAVA_HOME}/bin;${env.PATH}"
         // Agregar timestamp para versioning
         BUILD_TIMESTAMP = new Date().format('yyyyMMdd-HHmmss')
         IMAGE_TAG = "${BUILD_TIMESTAMP}-${BUILD_NUMBER}"
